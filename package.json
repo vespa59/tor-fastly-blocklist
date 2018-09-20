@@ -1,0 +1,24 @@
+{
+  "name": "tor-fastly-blacklist",
+  "version": "0.0.0",
+  "description": "Copy a current Tor exit node list to a Fastly edge dictionary",
+  "main": "index.js",
+  "directories": {
+    "example": "examples",
+    "lib": "lib",
+    "test": "test"
+  },
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/vespa59/tor-fastly-blacklist.git"
+  },
+  "author": "Steve Calderon",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/vespa59/tor-fastly-blacklist/issues"
+  },
+  "homepage": "https://github.com/vespa59/tor-fastly-blacklist#readme"
+}
