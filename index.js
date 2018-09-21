@@ -1,3 +1,10 @@
+/******************************************************************************************
+Synchronizes an ACL on a Fastly service with a current list from 
+https://check.torproject.org/cgi-bin/TorBulkExitList.py?ip=151.101.1.57
+
+Requires a valid Fastly Service ID, ACL, and token in config.js
+******************************************************************************************/
+
 const conf = require(__dirname + "/config.js");
 const async = require("async");
 const axios = require("axios");
@@ -17,16 +24,16 @@ fastlyService.request.defaults.timeout = 30000;
 
 
 async.auto({
-	get_tor_list: function(cb){
+	get_tor_list: cb => {
 		axios.get("https://check.torproject.org/cgi-bin/TorBulkExitList.py?ip=151.101.1.57")
-			.then(res =>{
+			.then(res => {
 				let ips = res.data.split("\n");
 
-				//remove comments
-				ips = ips.filter(ip => ip.charAt(0) != "#");
+				//remove anything that doesn't look like an IP address
+				ips = ips.filter(ip => ip.match(/^\b\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}\b$/));
 
-
-//				ips = ["127.0.0.1"];
+				// uncomment to override the tor list for quick testing
+				// ips = ["127.0.0.1"];
 
 				cb(null, ips);
 			})
@@ -34,7 +41,7 @@ async.auto({
 				cb(`Failed to retrieve Tor exit node list: ${err}`);
 			});
 	},
-	get_fastly_list: function(cb){
+	get_fastly_list: cb => {
 		fastlyService.getAclItems()
 			.then(res => {
 				cb(null, res.data.map(function(item){
@@ -58,44 +65,41 @@ async.auto({
 
 		let deltas = [];
 		//remove items that are in the fastly list but not the tor list
-		results.get_fastly_list.forEach(function(item){
+		results.get_fastly_list.forEach(item => {
 			if (results.get_tor_list.indexOf(item.ip) == -1)
 				deltas.push(new Delta("delete", item.ip, item.id));
 		});
 
 		//add items that are in the tor list but not in the fastly list
-		results.get_tor_list.forEach(function(item){
+		results.get_tor_list.forEach(item => {
 			if (results.get_fastly_list.map(fItem => fItem.ip).indexOf(item) == -1)
 				deltas.push(new Delta("create", item));
 		});
 		cb(null, deltas);
 	}],
-	patch_dictionary: ['calc_deltas', function(results, cb){
+	patch_dictionary: ['calc_deltas', (results, cb) => {
 		let res = results.calc_deltas;
 		var batches = res.chunk(500);
 
-		async.each(batches, function(batch, callback){
-			console.log(`Adding ${batch.filter(delta => delta.op === "create").length} items and removing ${batch.filter(delta => delta.op === "delete").length}.`);
+		async.each(batches, (batch, callback) => {
+			console.log(`Batch: adding ${batch.filter(delta => delta.op === "create").length} items and removing ${batch.filter(delta => delta.op === "delete").length}.`);
 
 			fastlyService.patchAclItems({"entries": batch})
 				.then(result => {
 					callback(null);
 				})
 				.catch(err => {
-					let msg = `Failed to update ACL: ${err.message}`;
+					let msg = `Failed to update ACL: ${err.response.data.detail}`;
 					if (err.response && err.response.status === 400)
 						msg += `\nYou may need to have Fastly increase your Maximum ACL Items.`;
 					callback(msg);
 				});
 
-		}, function(err) {
-//			if (err)
+		}, err => {
 				cb(err);
-//			else
-//				cb(null);
 		});			
 	}]
-}, function(err, results){
+}, (err, results) => {
 	if (err) {
 		console.log(err);
 	}
