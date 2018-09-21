@@ -13,7 +13,15 @@ Synchronizes a Fastly ACL with a current Tor exit node list from `https://check.
 
 1. Clone this repo or download all the files to a directory.
 2. `npm install`.
-3. Edit `config.js` and fill out the fields with your values.
+3. Create a `config.js` file that looks like this: 
+
+```
+module.exports = {
+	fastlyKey: "YOUR FASTLY KEY",
+	serviceId: "YOUR FASTLY SERVICE ID",
+	aclId: "YOUR FASTLY ACL ID"
+}
+```
 
 ## Usage
 
