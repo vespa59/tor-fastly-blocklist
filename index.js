@@ -2,15 +2,19 @@ const conf = require(__dirname + "/config.js");
 const async = require("async");
 const axios = require("axios");
 const fastly = require("fastly-promises");
+
 let fastlyService = fastly(conf.fastlyKey, conf.serviceId);
 
-fastlyService.getDictionaryItems = function(dId = conf.dictionaryId){
-	return this.request.get(`/service/${this.service_id}/dictionary/${dId}/items`);
+fastlyService.getAclItems = function(aclId = conf.aclId){
+	return this.request.get(`/service/${this.service_id}/acl/${aclId}/entries`);
 }
 
-fastlyService.patchDictionaryItems = function(deltas, dId = conf.dictionaryId){
-	return this.request.patch(`/service/${this.service_id}/dictionary/${dId}/items`, deltas);
+fastlyService.patchAclItems = function(deltas, aclId = conf.aclId){
+	return this.request.patch(`/service/${this.service_id}/acl/${aclId}/entries`, deltas);
 }
+
+fastlyService.request.defaults.timeout = 30000;
+
 
 async.auto({
 	get_tor_list: function(cb){
@@ -20,6 +24,10 @@ async.auto({
 
 				//remove comments
 				ips = ips.filter(ip => ip.charAt(0) != "#");
+
+
+//				ips = ["127.0.0.1"];
+
 				cb(null, ips);
 			})
 			.catch(err => {
@@ -27,54 +35,65 @@ async.auto({
 			});
 	},
 	get_fastly_list: function(cb){
-		fastlyService.getDictionaryItems()
+		fastlyService.getAclItems()
 			.then(res => {
 				cb(null, res.data.map(function(item){
-					return item.item_key;
+					return {"ip": item.ip, "id": item.id};
 				}));
 			})
 			.catch(err => {
-				cb(`Failed to retrieve current dictionary items: ${err.message}`);
+				cb(`Failed to retrieve current ACL items: ${err.message}`);
 			});
 	},
 	calc_deltas: ['get_tor_list', 'get_fastly_list', function(results, cb){
 		class Delta{
-			constructor(op, item_key) {
+			constructor(op, ip, id) {
 				this.op = op; //"create" or "delete"
-				this.item_key = item_key; // ip address
-				if (op === "create")
-					this.item_value = "true";
+				if (op === "delete")
+					this.id = id;
+				else
+					this.ip = ip;
 			}
 		}
 
 		let deltas = [];
 		//remove items that are in the fastly list but not the tor list
 		results.get_fastly_list.forEach(function(item){
-			if (results.get_tor_list.indexOf(item) == -1)
-				deltas.push(new Delta("delete", item));
+			if (results.get_tor_list.indexOf(item.ip) == -1)
+				deltas.push(new Delta("delete", item.ip, item.id));
 		});
 
 		//add items that are in the tor list but not in the fastly list
 		results.get_tor_list.forEach(function(item){
-			if (results.get_fastly_list.indexOf(item) == -1)
+			if (results.get_fastly_list.map(fItem => fItem.ip).indexOf(item) == -1)
 				deltas.push(new Delta("create", item));
 		});
 		cb(null, deltas);
 	}],
 	patch_dictionary: ['calc_deltas', function(results, cb){
 		let res = results.calc_deltas;
-		console.log(`Adding ${res.filter(delta => delta.op === "create").length} items and removing ${res.filter(delta => delta.op === "delete").length}.`);
+		var batches = res.chunk(500);
 
-		fastlyService.patchDictionaryItems({items: res})
-			.then(res => {
-				cb(null);
-			})
-			.catch(err => {
-				let msg = `Failed to update dictionary: ${err.message}`;
-				if (err.response.status === 400)
-					msg += `\nYou may need to have Fastly increase your Maximum Dictionary Items.`;
-				cb(msg);
-			});
+		async.each(batches, function(batch, callback){
+			console.log(`Adding ${batch.filter(delta => delta.op === "create").length} items and removing ${batch.filter(delta => delta.op === "delete").length}.`);
+
+			fastlyService.patchAclItems({"entries": batch})
+				.then(result => {
+					callback(null);
+				})
+				.catch(err => {
+					let msg = `Failed to update ACL: ${err.message}`;
+					if (err.response && err.response.status === 400)
+						msg += `\nYou may need to have Fastly increase your Maximum ACL Items.`;
+					callback(msg);
+				});
+
+		}, function(err) {
+//			if (err)
+				cb(err);
+//			else
+//				cb(null);
+		});			
 	}]
 }, function(err, results){
 	if (err) {
@@ -82,3 +101,12 @@ async.auto({
 	}
 	console.log('Done.')
 });
+
+
+//helper for batching
+Array.prototype.chunk = function(chunk_size){
+	let results = [];
+	while (this.length)
+		results.push(this.splice(0, chunk_size));
+	return results;
+}
