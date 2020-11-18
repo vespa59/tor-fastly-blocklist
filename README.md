@@ -1,4 +1,4 @@
-# tor-fastly-blacklist
+# tor-fastly-blocklist
 
 Synchronizes a Fastly ACL with a current Tor exit node list from `https://check.torproject.org/cgi-bin/TorBulkExitList.py?ip=151.101.1.57`. Patches to the ACL are done in batches of 500 so as to not run afoul of the Fastly API's batch update limit. 
 
